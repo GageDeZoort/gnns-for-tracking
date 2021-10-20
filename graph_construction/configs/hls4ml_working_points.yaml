@@ -1,0 +1,43 @@
+# Input/output configuration
+input_dir: /tigress/jdezoort/train_1
+output_dir: /scratch/gpfs2/jdezoort/test_graphs_hls4ml
+module_map_dir: /scratch/gpfs2/jdezoort/reorganize_IN_paper_repo/interaction_network_paper/graph_construction/module_maps
+n_files: 1770
+evtid_min: 1000
+evtid_max: 1050
+
+# Graph building configuration
+selection:
+    pt_min: 2 # GeV
+    phi_slope_max: 0.0006
+    z0_max: 15000
+    n_phi_sectors: 1
+    n_eta_sectors: 1
+    eta_range: [-5, 5]
+    endcaps: true
+    remove_noise: true
+    remove_duplicates: true
+    use_module_map: false
+
+###########################################
+## RECOMMENDED GRAPH CONSTRUCTION PARAMS ##
+###########################################
+# -------------------------------------
+#  pt [GeV]  phi_slope [1/mm]  z0 [mm]
+# -------------------------------------
+## 2         0.006             275
+## 1.9       0.006             275
+## 1.8       0.006             275
+## 1.7       0.006             275
+## 1.6       0.006             275
+## 1.5       0.006             275
+## 1.4       0.0062            290
+## 1.3       0.0064            305
+## 1.2       0.0066            320
+## 1.1       0.0068            335
+## 1         0.007             350 
+## 0.9       0.0072            375 
+## 0.8       0.0080            425
+## 0.7       0.0085            500
+## 0.6       0.0085            500
+## 0.5       0.0085            500
