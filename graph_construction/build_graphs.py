@@ -50,7 +50,7 @@ def select_edges(hits1, hits2, layer1, layer2,
                  use_module_map=False):
 
     # start with all possible pairs of hits
-    keys = ['evtid', 'r', 'phi', 'z', 'module_id']
+    keys = ['evtid', 'r', 'phi', 'z', 'module_id', 'overlapped']
     hit_pairs = hits1[keys].reset_index().merge(
         hits2[keys].reset_index(), on='evtid', suffixes=('_1', '_2'))
 
@@ -187,7 +187,8 @@ def construct_graph(hits, layer_pairs, phi_slope_max, z0_max,
                 'particle_id': hits['particle_id'],
                 'edge_index': np.array([[],[]]),
                 'edge_attr': np.array([[],[],[],[]]),
-                'y': [], 's': s, 'n_incorrect': 0}
+                'y': [], 's': s, 'n_incorrect': 0,
+                'edge_hit_id': []}
     
     # prepare the graph matrices
     n_nodes = hits.shape[0]
@@ -214,10 +215,16 @@ def construct_graph(hits, layer_pairs, phi_slope_max, z0_max,
     y[:] = ((pid1 == pid2) & (pid1>0) & (pid2>0)) 
     n_incorrect = check_truth_labels(hits, edges, y, pid1)
     
+    # check if edges are both in overlap region
+    id1 = hits.hit_id.loc[edges.index_1].values
+    id2 = hits.hit_id.loc[edges.index_2].values
+    edge_hit_id = np.stack((id1, id2), axis=-1)
+
     return {'x': x, 'hit_id': hits['hit_id'],
             'particle_id': hits['particle_id'],
             'edge_index': edge_index, 'edge_attr': edge_attr, 
-            'y': y, 's': s, 'n_incorrect': n_incorrect}
+            'y': y, 's': s, 'n_incorrect': n_incorrect,
+            'edge_hit_id': np.transpose(edge_hit_id)}
 
 def select_hits(hits, truth, particles, pt_min=0, endcaps=False, 
                 remove_noise=False, remove_duplicates=False):
@@ -382,32 +389,100 @@ def get_n_track_segs(hits_by_particle, valid_connections):
         
     return n_track_segs
 
-def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False):
+def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False, 
+                           phi_overlap=0.1, eta_overlap=0.1):
+
     """Split hits according to provided phi and eta boundaries."""
     hits_sectors = {}
     sector_info = {}
-    phi_overlap, eta_overlap = 0, 0
     for i in range(len(phi_edges) - 1):
-        phi_min, phi_max = phi_edges[i], phi_edges[i+1]
-        # Select hits in this phi sector
-        phi_hits = hits[((hits.phi > (phi_min-phi_overlap)) & 
-                          (hits.phi < (phi_max+phi_overlap)))]
-        # Center these hits on phi=0
-        centered_phi = phi_hits.phi - (phi_min + phi_max) / 2
+        phi_min = phi_edges[i]
+        phi_max = phi_edges[i+1]
+        
+        # simple check that we're in the phi sector
+        in_phi_sector = ((hits.phi > phi_min) & 
+                         (hits.phi < phi_max))
+        
+        # select hits in this phi sector
+        phi_hits = hits[in_phi_sector]
+        phi_hits = phi_hits.assign(old_phi=phi_hits.phi)
+        
+        # deterime upper and lower overlap regions
+        lower_overlap = ((hits.phi > (phi_min - phi_overlap)) & 
+                         (hits.phi < phi_min)) 
+        upper_overlap = ((hits.phi < (phi_max + phi_overlap)) & 
+                         (hits.phi > phi_max))
+        
+        # interior overlap accounts for where other sectors will intrude
+        interior_overlap = (((phi_hits.phi > phi_min) & 
+                             (phi_hits.phi < (phi_min+phi_overlap))) | 
+                            ((phi_hits.phi > (phi_max-phi_overlap)) & 
+                             (phi_hits.phi < phi_max)))
+        
+        # special case: regions bounded at +/-pi branch cut 
+        if (abs(phi_min-(-np.pi))<0.01):
+            lower_overlap = ((hits.phi > (np.pi-phi_overlap)) & 
+                             (hits.phi < np.pi))
+            upper_overlap = ((hits.phi < (phi_max + phi_overlap)) & 
+                             (hits.phi > phi_max))
+        if (abs(phi_max-np.pi) < 0.01):
+            lower_overlap = ((hits.phi > (phi_min - phi_overlap)) &
+                             (hits.phi < phi_min)) 
+            upper_overlap = ((hits.phi > -np.pi) &
+                             (hits.phi < (-np.pi+phi_overlap)))
+
+        # select hits in overlapped region
+        lower_overlap_hits = hits[lower_overlap]
+        upper_overlap_hits = hits[upper_overlap]
+        lower_phi = lower_overlap_hits.phi
+        lower_overlap_hits = lower_overlap_hits.assign(old_phi=lower_phi)
+        upper_phi = upper_overlap_hits.phi
+        upper_overlap_hits = upper_overlap_hits.assign(old_phi=upper_phi)
+        
+        # adjust values across +/-pi branch cut 
+        if (abs(phi_min-(-np.pi)) < 0.01):
+            new_lower_phi = -2*np.pi + lower_overlap_hits.phi
+            lower_overlap_hits = lower_overlap_hits.assign(phi=new_lower_phi)
+        if (abs(phi_max-np.pi) < 0.01):
+            new_upper_phi = 2*np.pi + upper_overlap_hits.phi
+            upper_overlap_hits = upper_overlap_hits.assign(phi=new_upper_phi)
+        
+        # center these hits on phi=0
+        phi_hits = phi_hits.assign(overlapped=np.zeros(len(phi_hits), dtype=bool))
+        phi_hits.loc[interior_overlap, 'overlapped'] = True
+        lower_overlap_hits = lower_overlap_hits.assign(overlapped=np.ones(len(lower_overlap_hits), dtype=bool))
+        upper_overlap_hits = upper_overlap_hits.assign(overlapped=np.ones(len(upper_overlap_hits), dtype=bool))
+        phi_hits = phi_hits.append(lower_overlap_hits)
+        phi_hits = phi_hits.append(upper_overlap_hits)
+        
+        centered_phi = phi_hits.phi - (phi_min + phi_max) / 2.
         phi_hits = phi_hits.assign(phi=centered_phi, phi_sector=i)
         for j in range(len(eta_edges) - 1):
-            eta_min, eta_max = eta_edges[j], eta_edges[j+1]
-            # Select hits in this eta sector
-            eta = calc_eta(phi_hits.r, phi_hits.z)
-            sec_hits = phi_hits[((eta > (eta_min-eta_overlap)) & 
-                                 (eta < (eta_max+eta_overlap)))]
+            eta_min = eta_edges[j] 
+            eta_max = eta_edges[j+1] 
             
+            # select hits in this eta sector
+            eta = calc_eta(phi_hits.r, phi_hits.z)
+            in_eta_overlap = (((eta > eta_min-eta_overlap) & (eta < eta_min)) | 
+                              ((eta < eta_max+eta_overlap) & (eta > eta_max)))
+            interior_eta_overlap = (((eta > eta_min) & 
+                                     (eta < (eta_min+eta_overlap))) | 
+                                    ((eta > (eta_max-eta_overlap)) & 
+                                     (eta < eta_max)))
+            sec_hits = phi_hits[(in_eta_overlap | 
+                                ((eta > eta_min) & 
+                                 (eta < eta_max)))]
+            sec_hits = sec_hits.assign(overlapped=(sec_hits.overlapped & 
+                                                   (in_eta_overlap | interior_eta_overlap)))
+    
             # label hits by tuple s = (eta_sector, phi_sector)
             hits_sectors[(j,i)] = sec_hits.assign(eta_sector=j)
                          
             # store eta and phi ranges per sector
             sector_info[(j,i)] = {'eta_range': [eta_min, eta_max],
-                                  'phi_range': [phi_min, phi_max]}
+                                  'phi_range': [phi_min, phi_max],
+                                  'eta_overlap': eta_overlap,
+                                  'phi_overlap': phi_overlap}
             if verbose:
                 logging.info(f"Sector ({i},{j}):\n" + 
                              f"...eta_range=({eta_min:.3f},{eta_max:.3f})\n"
@@ -444,12 +519,17 @@ def graph_summary(evtid, sectors, particle_properties,
     # loop over graph sectors and compile statistics
     sector_stats = {}
     total_possible_per_s = 0
+    all_edges, all_truth = [], []
     for i, sector in enumerate(sectors):
         
         # get information about the graph's sector
         s = sector['s'] # s = sector label
         sector_ranges = sector_info[s]
-        
+
+        # catalogue all edges by id
+        all_edges.extend(np.transpose(sector['edge_hit_id']).tolist())
+        all_truth.extend(sector['y'].tolist())
+
         # calculate graph properties
         n_nodes = sector['x'].shape[0]
         total_nodes += n_nodes
@@ -473,11 +553,23 @@ def graph_summary(evtid, sectors, particle_properties,
                            'n_nodes': n_nodes, 'n_edges': n_edges,
                            'purity': div(n_true, n_edges),
                            'efficiency': div(n_true, n_track_segs)}
-        
+
+    # count duplicated true and false edges
+    all_true_edges = [frozenset(ae) for i, ae in enumerate(all_edges) 
+                      if all_truth[i]==1]
+    all_false_edges = [frozenset(ae) for i, ae in enumerate(all_edges)
+                       if all_truth[i]==0]
+    te_counts = np.array(list(Counter(all_true_edges).values()))
+    fe_counts = np.array(list(Counter(all_false_edges).values()))
+    te_excess = np.sum(te_counts[te_counts > 1] - 1)
+    fe_excess = np.sum(fe_counts[fe_counts > 1] - 1)
+
     # proportion of true edges to all possible track segments
-    efficiency = div(total_true, total_track_segs)
+    efficiency = div(total_true-te_excess, total_track_segs)
     # proportion of true edges to total reconstructed edges
     purity = div(total_true, total_edges)
+    purity_corr = div(total_true - te_excess,
+                      total_edges - te_excess - fe_excess)
     # proportion of true track segments lost in sector boundaries
     boundary_fraction = div(total_track_segs - total_track_segs_sectored, 
                             total_track_segs)
@@ -486,7 +578,10 @@ def graph_summary(evtid, sectors, particle_properties,
                  f'...total nodes: {total_nodes}\n' +
                  f'...total edges: {total_edges}\n' + 
                  f'...efficiency: {efficiency:.5f}\n' +
-                 f'...purity: {purity:.5f}\n'
+                 f'...purity: {purity:.5f}\n' + 
+                 f'...purity_corr: {purity_corr:.5f}\n' +
+                 f'...duplicated true edges: {te_excess}\n' + 
+                 f'...duplicated false edges: {fe_excess}\n' +
                  f'...boundary edge fraction: {boundary_fraction:.5f}')
 
     return {'n_nodes': total_nodes, 'n_edges': total_edges,
@@ -498,7 +593,7 @@ def process_event(prefix, output_dir, module_map, pt_min,
                   n_eta_sectors, n_phi_sectors,
                   eta_range, phi_range, phi_slope_max, z0_max,
                   endcaps, remove_noise, remove_duplicates,
-                  use_module_map):
+                  use_module_map, phi_overlap, eta_overlap):
     
     # define valid layer pair connections
     layer_pairs = [(0,1), (1,2), (2,3)] # barrel-barrel
@@ -532,7 +627,9 @@ def process_event(prefix, output_dir, module_map, pt_min,
     # divide detector into sectors
     phi_edges = np.linspace(*phi_range, num=n_phi_sectors+1)
     eta_edges = np.linspace(*eta_range, num=n_eta_sectors+1)
-    hits_sectors, sector_info = split_detector_sectors(hits, phi_edges, eta_edges)
+    hits_sectors, sector_info = split_detector_sectors(hits, phi_edges, eta_edges,
+                                                       phi_overlap=phi_overlap,
+                                                       eta_overlap=eta_overlap)
     
     # calculate particle truth in each sector
     n_track_segs_per_s = {}
@@ -608,10 +705,12 @@ def main():
     input_dir = config['input_dir']
     all_files = os.listdir(input_dir)
     suffix = '-hits.csv'
+    #file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
+    #                       for f in all_files if f.endswith(suffix))
+    #file_prefixes = file_prefixes[:config['n_files']]
     file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
                            for f in all_files if f.endswith(suffix))
-    file_prefixes = file_prefixes[:config['n_files']]
-    
+
     # restrict files to a given input range
     evtids = [int(prefix[-9:]) for prefix in file_prefixes]
     evtid_max, evtid_min = config['evtid_max'], config['evtid_min']
