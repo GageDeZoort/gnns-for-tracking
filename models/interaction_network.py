@@ -1,7 +1,6 @@
 import torch
 import torch_geometric
 from torch import Tensor
-
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.transforms as T
@@ -41,11 +40,14 @@ class ObjectModel(nn.Module):
 
 class InteractionNetwork(MessagePassing):
     def __init__(self, node_indim, edge_indim, 
-                 node_outdim=3, edge_outdim=4, hidden_size=40):
-        super(InteractionNetwork, self).__init__(aggr='add', 
+                 node_outdim=3, edge_outdim=4, 
+                 hidden_size=40, aggr='add'):
+        super(InteractionNetwork, self).__init__(aggr=aggr, 
                                                  flow='source_to_target')
-        self.R1 = RelationalModel(2*node_indim+edge_indim, edge_outdim, hidden_size)
-        self.O = ObjectModel(node_indim+edge_outdim, node_outdim, hidden_size)
+        self.R1 = RelationalModel(2*node_indim + edge_indim, 
+                                  edge_outdim, hidden_size)
+        self.O = ObjectModel(node_indim + edge_outdim, 
+                             node_outdim, hidden_size)
         self.E_tilde: Tensor = Tensor()
 
     def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Tensor) -> Tensor:
@@ -56,8 +58,8 @@ class InteractionNetwork(MessagePassing):
 
     def message(self, x_i, x_j, edge_attr):
         # x_i --> incoming, x_j --> outgoing        
-        m1 = torch.cat([x_i, x_j, edge_attr], dim=1)
-        self.E_tilde = self.R1(m1)
+        m = torch.cat([x_i, x_j, edge_attr], dim=1)
+        self.E_tilde = self.R1(m)
         return self.E_tilde
 
     def update(self, aggr_out, x):
