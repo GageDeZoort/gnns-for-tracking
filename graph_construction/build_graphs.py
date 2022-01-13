@@ -6,6 +6,7 @@ import logging
 import multiprocessing as mp
 from functools import partial
 from collections import Counter
+from datetime import datetime
 
 # Externals
 import yaml
@@ -94,7 +95,8 @@ def select_edges(hits1, hits2, layer1, layer2,
                       (in_module_map))                    # data-driven
     
     # store edges (in COO format) and geometric edge features 
-    selected_edges = {'edges': hit_pairs[['index_1', 'index_2']][good_edge_mask],
+    selected_edges = {'edges': hit_pairs[['index_1', 
+                                          'index_2']][good_edge_mask],
                       'dr': dr[good_edge_mask],    
                       'dphi': dphi[good_edge_mask], 
                       'dz': dz[good_edge_mask],
@@ -187,8 +189,9 @@ def construct_graph(hits, layer_pairs, phi_slope_max, z0_max,
                 'particle_id': hits['particle_id'],
                 'edge_index': np.array([[],[]]),
                 'edge_attr': np.array([[],[],[],[]]),
-                'y': [], 's': s, 'n_incorrect': 0,
-                'edge_hit_id': []}
+                'y': np.array([]), 's': s, 
+                'n_incorrect': 0, 
+                'edge_hit_id': np.array([])}
     
     # prepare the graph matrices
     n_nodes = hits.shape[0]
@@ -390,7 +393,7 @@ def get_n_track_segs(hits_by_particle, valid_connections):
     return n_track_segs
 
 def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False, 
-                           phi_overlap=0.1, eta_overlap=0.1):
+                           phi_overlap=0.1, eta_overlaps=0.1):
 
     """Split hits according to provided phi and eta boundaries."""
     hits_sectors = {}
@@ -418,7 +421,8 @@ def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False,
                              (phi_hits.phi < (phi_min+phi_overlap))) | 
                             ((phi_hits.phi > (phi_max-phi_overlap)) & 
                              (phi_hits.phi < phi_max)))
-        
+        # this assumes a uniform overlap parameter!
+
         # special case: regions bounded at +/-pi branch cut 
         if (abs(phi_min-(-np.pi))<0.01):
             lower_overlap = ((hits.phi > (np.pi-phi_overlap)) & 
@@ -450,17 +454,19 @@ def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False,
         # center these hits on phi=0
         phi_hits = phi_hits.assign(overlapped=np.zeros(len(phi_hits), dtype=bool))
         phi_hits.loc[interior_overlap, 'overlapped'] = True
-        lower_overlap_hits = lower_overlap_hits.assign(overlapped=np.ones(len(lower_overlap_hits), dtype=bool))
-        upper_overlap_hits = upper_overlap_hits.assign(overlapped=np.ones(len(upper_overlap_hits), dtype=bool))
+        lower_overlap_hits = lower_overlap_hits.assign(overlapped=True)
+        upper_overlap_hits = upper_overlap_hits.assign(overlapped=True)
         phi_hits = phi_hits.append(lower_overlap_hits)
         phi_hits = phi_hits.append(upper_overlap_hits)
-        
         centered_phi = phi_hits.phi - (phi_min + phi_max) / 2.
         phi_hits = phi_hits.assign(phi=centered_phi, phi_sector=i)
+        
+        # loop over eta ranges
         for j in range(len(eta_edges) - 1):
             eta_min = eta_edges[j] 
             eta_max = eta_edges[j+1] 
-            
+            eta_overlap = eta_overlaps
+
             # select hits in this eta sector
             eta = calc_eta(phi_hits.r, phi_hits.z)
             in_eta_overlap = (((eta > eta_min-eta_overlap) & (eta < eta_min)) | 
@@ -483,6 +489,8 @@ def split_detector_sectors(hits, phi_edges, eta_edges, verbose=False,
                                   'phi_range': [phi_min, phi_max],
                                   'eta_overlap': eta_overlap,
                                   'phi_overlap': phi_overlap}
+                                  #'nhits': len(sec_hits)}
+            
             if verbose:
                 logging.info(f"Sector ({i},{j}):\n" + 
                              f"...eta_range=({eta_min:.3f},{eta_max:.3f})\n"
@@ -593,7 +601,7 @@ def process_event(prefix, output_dir, module_map, pt_min,
                   n_eta_sectors, n_phi_sectors,
                   eta_range, phi_range, phi_slope_max, z0_max,
                   endcaps, remove_noise, remove_duplicates,
-                  use_module_map, phi_overlap, eta_overlap):
+                  use_module_map, phi_overlap, eta_overlaps):
     
     # define valid layer pair connections
     layer_pairs = [(0,1), (1,2), (2,3)] # barrel-barrel
@@ -627,9 +635,12 @@ def process_event(prefix, output_dir, module_map, pt_min,
     # divide detector into sectors
     phi_edges = np.linspace(*phi_range, num=n_phi_sectors+1)
     eta_edges = np.linspace(*eta_range, num=n_eta_sectors+1)
+    #eta_overlaps = np.array([abs(eta_edges[i]-eta_edges[i+1])/10. 
+    #                         for i in range(len(eta_edges)-1)])
+    logging.info(f'Using uniform eta overlaps {eta_overlaps}')
     hits_sectors, sector_info = split_detector_sectors(hits, phi_edges, eta_edges,
                                                        phi_overlap=phi_overlap,
-                                                       eta_overlap=eta_overlap)
+                                                       eta_overlaps=eta_overlaps)
     
     # calculate particle truth in each sector
     n_track_segs_per_s = {}
@@ -705,9 +716,6 @@ def main():
     input_dir = config['input_dir']
     all_files = os.listdir(input_dir)
     suffix = '-hits.csv'
-    #file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
-    #                       for f in all_files if f.endswith(suffix))
-    #file_prefixes = file_prefixes[:config['n_files']]
     file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
                            for f in all_files if f.endswith(suffix))
 
@@ -748,6 +756,7 @@ def main():
     logging.info('All done!')
     graph_sectors = [graph['sectors'] for graph in output]
     summary_stats = [graph['summary_stats'] for graph in output]
+
     n_nodes = np.array([graph_stats['n_nodes'] 
                         for graph_stats in summary_stats])
     n_edges = np.array([graph_stats['n_edges'] 
@@ -764,6 +773,23 @@ def main():
                  f'...purity: {purity.mean():.5f}+/-{purity.std():.5f}\n' + 
                  f'...efficiency: {efficiency.mean():.5f}+/-{efficiency.std():.5f}\n' + 
                  f'...boundary fraction: {boundary_fraction.mean():.5f}+/-{boundary_fraction.std():.5f}')
+    
+
+    # output to csv
+    graph_level_stats = pd.DataFrame({'n_nodes': n_nodes, 'n_edges': n_edges,
+                                      'purity': purity, 'efficiency': efficiency})
+    now = datetime.now()
+    dt_string = now.strftime("%m-%d-%Y_%H-:%M")
+    print("date and time =", dt_string)
+    outfile = 'stats/'+dt_string+'.csv'
+    logging.info(f'Saving summary stats to {outfile}')
+    f = open(outfile, 'w')
+    f.write('# args used to build graphs\n')
+    for arg in vars(args):
+        f.write(f'# {arg}: {getattr(args,arg)}\n')
+    graph_level_stats.to_csv(f, index=False)
+    graph_level_stats.to_csv(outfile, index=False)
+
     
     # analyze per-sector statistics
     sector_stats_list = [graph_stats['sector_stats'] 

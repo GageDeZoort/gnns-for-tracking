@@ -1,25 +1,24 @@
 # Input/output configuration
-input_dir: /tigress/jdezoort/train_2
-#output_dir: ../graphs/ptmin_1GeV_train2
-output_dir: /scratch/gpfs2/jdezoort/reorganize_IN_paper_repo/hitgraphs_0p5
-module_map_dir: /scratch/gpfs2/jdezoort/reorganize_IN_paper_repo/interaction_network_paper/graph_construction/module_maps
+input_dir: /tigress/jdezoort/train_1
+output_dir: ../graphs/test
+module_map_dir: 
 n_files: 2000
-evtid_min: 0
-evtid_max: 5000
+evtid_min: 1000
+evtid_max: 1010
 
 # Graph building configuration
 selection:
-    pt_min: 0.5 # GeV
-    phi_slope_max: 0.0085
-    z0_max: 500
-    n_phi_sectors: 1
-    n_eta_sectors: 1
-    phi_overlap: 0
-    eta_overlap: 0
+    pt_min: 0.0 # GeV
+    phi_slope_max: 0.01
+    z0_max: 750
+    n_phi_sectors: 8
+    n_eta_sectors: 8
+    phi_overlap: 0.08
+    eta_overlaps: 0.125
     eta_range: [-5, 5]
     endcaps: true
-    remove_noise: true
-    remove_duplicates: true
+    remove_noise: false
+    remove_duplicates: false
     use_module_map: false
 
 ###########################################
@@ -44,4 +43,4 @@ selection:
 ## 0.7       0.0085            500
 ## 0.6       0.0085            500
 ## 0.5       0.0085            500
-## 0.0       0.001             750
+## 0.0       0.01              750
