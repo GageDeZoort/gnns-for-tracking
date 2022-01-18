@@ -1,16 +1,16 @@
 # Input/output configuration
 input_dir: /tigress/jdezoort/train_1
-output_dir: ../graphs/test
+output_dir: ../graphs/train1_ptmin1
 module_map_dir: 
 n_files: 2000
 evtid_min: 1000
-evtid_max: 1010
+evtid_max: 3000
 
 # Graph building configuration
 selection:
-    pt_min: 0.0 # GeV
-    phi_slope_max: 0.01
-    z0_max: 750
+    pt_min: 1.0 # GeV
+    phi_slope_max: 0.007
+    z0_max: 350
     n_phi_sectors: 8
     n_eta_sectors: 8
     phi_overlap: 0.08

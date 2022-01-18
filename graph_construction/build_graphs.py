@@ -30,6 +30,7 @@ def parse_args():
     add_arg('--interactive', action='store_true')
     add_arg('--start-evtid', type=int, default=1000)
     add_arg('--end-evtid', type=int, default=3000)
+    add_arg('--redo', type=bool, default=False)
     return parser.parse_args()
 
 def calc_dphi(phi1, phi2):
@@ -743,6 +744,17 @@ def main():
     output_dir = os.path.expandvars(config['output_dir'])
     os.makedirs(output_dir, exist_ok=True)
     logging.info(f'Writing outputs to {output_dir}')
+    
+    # skip pre-constructed graphs optionally
+    if not args.redo:
+        existing_files = os.listdir(output_dir)
+        existing_evtid = [f.split('_')[0].split('00000')[-1]
+                          for f in existing_files]
+        existing_evitd = np.unique(existing_evtid)
+        logging.info(f"Requested {len(file_prefixes)} new graphs")
+        file_prefixes = [f for f in file_prefixes
+                         if f.split('00000')[-1] not in existing_evtid]
+        logging.info(f"Skipping pre-existing graphs, will calculate {len(file_prefixes)} new ones.") 
 
     # process input files with a worker pool
     with mp.Pool(processes=args.n_workers) as pool:
@@ -779,16 +791,17 @@ def main():
     graph_level_stats = pd.DataFrame({'n_nodes': n_nodes, 'n_edges': n_edges,
                                       'purity': purity, 'efficiency': efficiency})
     now = datetime.now()
-    dt_string = now.strftime("%m-%d-%Y_%H-:%M")
-    print("date and time =", dt_string)
+    dt_string = now.strftime("%m-%d-%Y_%H-%M")
+    logging.debug("date and time =", dt_string)
     outfile = 'stats/'+dt_string+'.csv'
     logging.info(f'Saving summary stats to {outfile}')
+
     f = open(outfile, 'w')
     f.write('# args used to build graphs\n')
     for arg in vars(args):
         f.write(f'# {arg}: {getattr(args,arg)}\n')
     graph_level_stats.to_csv(f, index=False)
-    graph_level_stats.to_csv(outfile, index=False)
+    #graph_level_stats.to_csv(outfile, index=False)
 
     
     # analyze per-sector statistics

@@ -31,8 +31,9 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     add_arg = parser.add_argument
-    add_arg('-i', '--indir', type=str, default='graphs/ptmin_0GeV')
+    add_arg('-i', '--indir', type=str, default='graphs/train1_ptmin0')
     add_arg('-o', '--outdir', type=str, default='trained_models')
+    add_arg('--outfile', type=str, default='')
     add_arg('-v', '--verbose', type=bool, default=0)
     add_arg('--n-train', type=int, default=120)
     add_arg('--n-test', type=int, default=30)
@@ -42,6 +43,9 @@ def parse_args():
     add_arg('--step-size', type=int, default=10)
     add_arg('--n-epochs', type=int, default=250)
     add_arg('--log-interval', type=int, default=10)
+    add_arg('--q-min', type=float, default=0.05)
+    add_arg('--sb', type=float, default=1)
+    add_arg('--save-models', type=bool, default=False)
     return parser.parse_args()
 
 def zero_div(a,b):
@@ -123,13 +127,15 @@ def test(model, device, test_loader, thld=0.5,
             # condensation loss
             particle_id = data.particle_id
             loss_c = condensation_loss(beta, xc, particle_id, 
-                                       device=device, q_min=0.05).item()
+                                       device=device, 
+                                       q_min=args.q_min).item()
             loss_c *= loss_c_scale
             losses_c.append(loss_c)
 
             # background loss
             loss_b = background_loss(beta, xc, particle_id, 
-                                     device='cpu', q_min=0.05, sb=1).item()
+                                     device='cpu', q_min=args.q_min, 
+                                     sb=args.sb).item()
             loss_b *= loss_b_scale
             losses_b.append(loss_b)
             
@@ -169,12 +175,13 @@ def train(args, model, device, train_loader, optimizer, epoch,
 
         # condensation loss
         loss_c = condensation_loss(beta, xc, particle_id, 
-                                   device=device, q_min=0.05)
+                                   device=device, q_min=args.q_min)
         loss_c *= loss_c_scale
         
         # background loss
         loss_b = background_loss(beta, xc, particle_id, 
-                                 device='cpu', q_min=0.05, sb=1)
+                                 device='cpu', q_min=args.q_min, 
+                                 sb=args.sb)
         loss_b *= loss_b_scale
  
         # optimize total loss
@@ -284,8 +291,13 @@ for epoch in range(1, args.n_epochs + 1):
     output['train_loss_b'].append(tlb)
     output['test_loss'].append(test_loss)
     output['test_acc'].append(test_acc)
-    torch.save(model.state_dict(),
-               f"trained_models/dev_epoch{epoch}.pt")
-    write_output_file('trained_models/train_stats/dev.csv', 
+
+    outfile = 'dev'
+    if (args.outfile != ''):
+        outfile = args.outfile
+    if (args.save_models):    
+        torch.save(model.state_dict(),
+                   f"trained_models/{outfile}_epoch{epoch}.pt")
+    write_output_file('trained_models/train_stats/{outfile}.csv', 
                       args, pd.DataFrame(output))
    
