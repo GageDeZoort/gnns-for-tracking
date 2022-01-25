@@ -11,7 +11,7 @@ def V_repulsive(x, x_alpha, q_alpha, device='cpu'):
     return hinges * q_alpha
 
 def condensation_loss(beta, x, particle_id, device='cpu', q_min=1):
-    loss = 0
+    loss = torch.tensor(0.0, dtype=torch.float).to(device)
     q = torch.arctanh(beta)**2 + q_min
     for pid in torch.unique(particle_id):
         p = pid.item()
@@ -29,7 +29,7 @@ def condensation_loss(beta, x, particle_id, device='cpu', q_min=1):
     return loss
 
 def background_loss(beta, x, particle_id, device='cpu', q_min=1, sb=10):
-    loss = 0
+    loss = torch.tensor(0.0, dtype=torch.float).to(device)
     unique_pids = torch.unique(particle_id)
     beta_alphas = torch.zeros(len(unique_pids)).to(device)
     for i, pid in enumerate(unique_pids):
@@ -43,5 +43,5 @@ def background_loss(beta, x, particle_id, device='cpu', q_min=1, sb=10):
     
     n = (particle_id==0).long()
     nb = torch.sum(n)
-    if (nb==0): return torch.tensor(0)
+    if (nb==0): return torch.tensor(0, dtype=float)
     return torch.mean(1-beta_alphas) + sb * torch.sum(n*beta) / nb

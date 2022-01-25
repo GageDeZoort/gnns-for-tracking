@@ -26,27 +26,30 @@ from models.track_condensation_network import TCN
 from models.condensation_loss import condensation_loss
 from models.condensation_loss import background_loss
 
-def parse_args():
+def parse_args(args):
     """ parse command line arguments
     """
     parser = argparse.ArgumentParser()
     add_arg = parser.add_argument
     add_arg('-i', '--indir', type=str, default='graphs/train1_ptmin0')
     add_arg('-o', '--outdir', type=str, default='trained_models')
-    add_arg('--outfile', type=str, default='')
+    add_arg('--stat-outfile', type=str, default='test')
+    add_arg('--model-outfile', type=str, default='model')
     add_arg('-v', '--verbose', type=bool, default=0)
     add_arg('--n-train', type=int, default=120)
     add_arg('--n-test', type=int, default=30)
     add_arg('--n-val', type=int, default=10)
     add_arg('--learning-rate', type=float, default=10**-4)
-    add_arg('--gamma', type=float, default=0.95)
+    add_arg('--gamma', type=float, default=1)
     add_arg('--step-size', type=int, default=10)
     add_arg('--n-epochs', type=int, default=250)
     add_arg('--log-interval', type=int, default=10)
-    add_arg('--q-min', type=float, default=0.05)
-    add_arg('--sb', type=float, default=1)
+    add_arg('--q-min', type=float, default=0.001)
+    add_arg('--sb', type=float, default=0.001)
+    add_arg('--loss-c-scale', type=float, default=10000.0)
+    add_arg('--loss-b-scale', type=float, default=0.0025)
     add_arg('--save-models', type=bool, default=False)
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 def zero_div(a,b):
     """ divide, potentially by zero
@@ -76,7 +79,7 @@ def validate(model, device, val_loader):
             TN = torch.sum((y==0) & (w<thld)).item()
             FP = torch.sum((y==0) & (w>=thld)).item()
             FN = torch.sum((y==1) & (w<=thld)).item()
-            acc = (TP+TN)/(TP+TN+FP+FN)
+            acc = zero_div(TP+TN, TP+TN+FP+FN)
             TPR = zero_div(TP, TP+FN) 
             TNR = zero_div(TN, TN+FP)
             delta = abs(TPR-TNR)
@@ -91,8 +94,7 @@ def validate(model, device, val_loader):
     logging.info(f'Optimal edge weight threshold: {np.mean(opt_thlds):.5f}')
     return np.nanmean(opt_thlds) 
 
-def test(model, device, test_loader, thld=0.5, 
-         loss_c_scale=10, loss_b_scale=1./500):
+def test(args, model, device, test_loader, thld=0.5):
     """ test routine, call on an unseen portion of data to 
         evaluate how well the model has generalized
     """
@@ -129,29 +131,33 @@ def test(model, device, test_loader, thld=0.5,
             loss_c = condensation_loss(beta, xc, particle_id, 
                                        device=device, 
                                        q_min=args.q_min).item()
-            loss_c *= loss_c_scale
+            loss_c *= args.loss_c_scale
             losses_c.append(loss_c)
 
             # background loss
             loss_b = background_loss(beta, xc, particle_id, 
                                      device='cpu', q_min=args.q_min, 
                                      sb=args.sb).item()
-            loss_b *= loss_b_scale
+            loss_b *= args.loss_b_scale
             losses_b.append(loss_b)
             
             # total loss
             loss += loss_c + loss_b
             losses.append(loss)
     
-    logging.info(f'Total Test Loss: {np.mean(losses):.5f}')
-    logging.info(f'Edge Classification Loss: {np.mean(losses_w):.5f}')
-    logging.info(f'Edge Classification Accuracy: {np.mean(accs):.5f}')
-    logging.info(f'Condensation Test Loss: {np.mean(losses_c):.5f}')
-    logging.info(f'Background Test Loss: {np.mean(losses_b):.5f}')
-    return np.nanmean(losses), np.nanmean(accs)
+    loss = np.nanmean(losses)
+    acc = np.nanmean(accs)
+    loss_w = np.nanmean(losses_w)
+    loss_b = np.nanmean(losses_b)
+    loss_c = np.nanmean(losses_c)
+    logging.info(f'Total Test Loss: {loss:.5f}')
+    logging.info(f'Edge Classification Loss: {loss_w:.5f}')
+    logging.info(f'Edge Classification Accuracy: {acc:.5f}')
+    logging.info(f'Condensation Test Loss: {loss_c:.5f}')
+    logging.info(f'Background Test Loss: {loss_b:.5f}')
+    return loss, loss_w, loss_c, loss_b, acc
 
-def train(args, model, device, train_loader, optimizer, epoch,
-          loss_w_scale=1, loss_c_scale=10, loss_b_scale=1./500):
+def train(args, model, device, train_loader, optimizer, epoch):
     """ train routine, loss and accumulated gradients used to update
         the model via the ADAM optimizer externally 
     """
@@ -170,19 +176,18 @@ def train(args, model, device, train_loader, optimizer, epoch,
 
         # edge weight loss
         loss_w = F.binary_cross_entropy(w, y, reduction='mean')
-        loss_w *= loss_w_scale
         loss = loss_w
 
         # condensation loss
         loss_c = condensation_loss(beta, xc, particle_id, 
                                    device=device, q_min=args.q_min)
-        loss_c *= loss_c_scale
+        loss_c *= args.loss_c_scale
         
         # background loss
         loss_b = background_loss(beta, xc, particle_id, 
                                  device='cpu', q_min=args.q_min, 
                                  sb=args.sb)
-        loss_b *= loss_b_scale
+        loss_b *= args.loss_b_scale
  
         # optimize total loss
         loss += (loss_c + loss_b)
@@ -221,83 +226,100 @@ def write_output_file(fname, args, df):
     f.close()
     
 
-# parse the command line 
-args = parse_args()
+def main(args): 
+    # parse the command line 
+    args = parse_args(args)
+    
+    # initialize logging
+    log_format = '%(asctime)s %(levelname)s %(message)s'
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(level=log_level, format=log_format)
+    logging.info('Initializing')
+    
+    # import graphs from specified directory 
+    graph_files = np.array(os.listdir(args.indir))
+    graph_paths = np.array([os.path.join(args.indir, graph_file)
+                            for graph_file in graph_files])
+    
+    # remove empty graphs from the dataset
+    empty_graphs = []
+    for path in graph_paths:
+        f = np.load(path)
+        if (len(f['edge_index'][0])==0):
+            empty_graphs.append(path)
+    for g in empty_graphs: 
+        graph_paths = graph_paths[graph_paths!=g]
 
-# initialize logging
-log_format = '%(asctime)s %(levelname)s %(message)s'
-log_level = logging.DEBUG if args.verbose else logging.INFO
-logging.basicConfig(level=log_level, format=log_format)
-logging.info('Initializing')
-
-# import graphs from specified directory 
-graph_files = np.array(os.listdir(args.indir))
-graph_paths = np.array([os.path.join(args.indir, graph_file)
-                        for graph_file in graph_files])
-
-# create partion graphs randomly into train, test, val sets
-n_graphs = len(graph_files)
-IDs = np.arange(n_graphs)
-np.random.shuffle(IDs)
-ntrn = args.n_train
-ntst = args.n_test
-nval = args.n_val
-train_IDs = IDs[:ntrn]
-test_IDs = IDs[ntrn:(ntrn+ntst)]
-val_IDs = IDs[(ntrn+ntst):(ntrn+ntst+nval)]
-partition = {'train': graph_paths[train_IDs],
-             'test':  graph_paths[test_IDs],
-             'val': graph_paths[val_IDs]}
-
-# build data loaders for each data partition
-params = {'batch_size': 1, 'shuffle': True, 'num_workers': 1}
-train_set = GraphDataset(graph_files=partition['train'])
-train_loader = DataLoader(train_set, **params)
-test_set = GraphDataset(graph_files=partition['test'])
-test_loader = DataLoader(test_set, **params)
-val_set = GraphDataset(graph_files=partition['val'])
-val_loader = DataLoader(val_set, **params)
-
-# use cuda (gpu) if possible, otherwise fallback to cpu
-use_cuda = torch.cuda.is_available()
-device = torch.device("cuda" if use_cuda else "cpu")
-logging.info(f'Utilizing {device}')
-
-# instantiate instance of the track condensation network
-model = TCN(3, 4, 2).to(device)
-total_trainable_params = sum(p.numel() for p in model.parameters())
-logging.info(f'Total Trainable Params: {total_trainable_params}')
-
-# instantiate optimizer with scheduled learning rate decay
-optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-scheduler = StepLR(optimizer, step_size=args.step_size,
-                   gamma=args.gamma)
-
-# training loop
-output = {'train_loss': [], 'test_loss': [], 'test_acc': [],
-          'train_loss_w': [], 'train_loss_c': [], 'train_loss_b': []}
-for epoch in range(1, args.n_epochs + 1):
-    logging.info(f"---- Epoch {epoch} ----")
-    train_loss, tlw, tlc, tlb = train(args, model, device, 
-                                      train_loader, optimizer, epoch)
-    thld = validate(model, device, val_loader)
-    test_loss, test_acc = test(model, device, test_loader, thld=thld)
-    scheduler.step()
-
-    # save output
-    output['train_loss'].append(train_loss)
-    output['train_loss_w'].append(tlw)
-    output['train_loss_c'].append(tlc)
-    output['train_loss_b'].append(tlb)
-    output['test_loss'].append(test_loss)
-    output['test_acc'].append(test_acc)
-
-    outfile = 'dev'
-    if (args.outfile != ''):
-        outfile = args.outfile
-    if (args.save_models):    
-        torch.save(model.state_dict(),
-                   f"trained_models/{outfile}_epoch{epoch}.pt")
-    write_output_file('trained_models/train_stats/{outfile}.csv', 
-                      args, pd.DataFrame(output))
+    # create partion graphs randomly into train, test, val sets
+    n_graphs = len(graph_paths)
+    IDs = np.arange(n_graphs)
+    np.random.shuffle(IDs)
+    ntrn = args.n_train
+    ntst = args.n_test
+    nval = args.n_val
+    train_IDs = IDs[:ntrn]
+    test_IDs = IDs[ntrn:(ntrn+ntst)]
+    val_IDs = IDs[(ntrn+ntst):(ntrn+ntst+nval)]
+    partition = {'train': graph_paths[train_IDs],
+                 'test':  graph_paths[test_IDs],
+                 'val': graph_paths[val_IDs]}
+    
+    # build data loaders for each data partition
+    params = {'batch_size': 1, 'shuffle': True, 'num_workers': 1}
+    train_set = GraphDataset(graph_files=partition['train'])
+    train_loader = DataLoader(train_set, **params)
+    test_set = GraphDataset(graph_files=partition['test'])
+    test_loader = DataLoader(test_set, **params)
+    val_set = GraphDataset(graph_files=partition['val'])
+    val_loader = DataLoader(val_set, **params)
+    
+    # use cuda (gpu) if possible, otherwise fallback to cpu
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    logging.info(f'Utilizing {device}')
+    
+    # instantiate instance of the track condensation network
+    model = TCN(3, 4, 2).to(device)
+    total_trainable_params = sum(p.numel() for p in model.parameters())
+    logging.info(f'Total Trainable Params: {total_trainable_params}')
+    
+    # instantiate optimizer with scheduled learning rate decay
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    scheduler = StepLR(optimizer, step_size=args.step_size,
+                       gamma=args.gamma)
+    
+    # epoch loop
+    output = {'train_loss': [], 'test_loss': [], 'test_acc': [],
+              'train_loss_w': [], 'train_loss_c': [], 'train_loss_b': [],
+              'test_loss_w': [], 'test_loss_c': [], 'test_loss_b': []}
+    for epoch in range(1, args.n_epochs + 1):
+        logging.info(f"---- Epoch {epoch} ----")
+        train_loss, tlw, tlc, tlb = train(args, model, device, 
+                                          train_loader, optimizer, epoch)
+        thld = validate(model, device, val_loader)
+        test_loss, te_lw, te_lc, te_lb, te_acc = test(args, model, device, 
+                                                      test_loader, thld=thld)
+        scheduler.step()
+        
+        # save output
+        output['train_loss'].append(train_loss)
+        output['train_loss_w'].append(tlw)
+        output['train_loss_c'].append(tlc)
+        output['train_loss_b'].append(tlb)
+        output['test_loss'].append(test_loss)
+        output['test_loss_w'].append(te_lw)
+        output['test_loss_c'].append(te_lc)
+        output['test_loss_b'].append(te_lb)
+        output['test_acc'].append(te_acc)
+                
+        if (args.save_models):    
+            model_out = os.path.join(args.outdir, 
+                                     f"{args.model_outfile}_epoch{epoch}.pt")
+            torch.save(model.state_dict(), model_out)
+        
+        stat_out = os.path.join(args.outdir,
+                                f"{args.stat_outfile}.csv")
+        write_output_file(stat_out, args, pd.DataFrame(output))
    
+if __name__=='__main__':
+    main(sys.argv[1:])

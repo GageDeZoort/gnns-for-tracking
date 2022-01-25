@@ -51,7 +51,6 @@ class InteractionNetwork(MessagePassing):
         self.E_tilde: Tensor = Tensor()
 
     def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Tensor) -> Tensor:
-
         # propagate_type: (x: Tensor, edge_attr: Tensor)
         x_tilde = self.propagate(edge_index, x=x, edge_attr=edge_attr, size=None)
         return x_tilde, self.E_tilde

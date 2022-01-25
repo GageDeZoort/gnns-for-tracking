@@ -1,10 +1,8 @@
 # Input/output configuration
-input_dir: /tigress/jdezoort/train_1
-output_dir: ../graphs/train1_ptmin1
+input_dir: /tigress/jdezoort/train_2
+output_dir: ../graphs/train2_ptmin1
 module_map_dir: 
 n_files: 2000
-evtid_min: 1000
-evtid_max: 3000
 
 # Graph building configuration
 selection:
@@ -17,7 +15,7 @@ selection:
     eta_overlaps: 0.125
     eta_range: [-5, 5]
     endcaps: true
-    remove_noise: false
+    remove_noise: true
     remove_duplicates: false
     use_module_map: false
 

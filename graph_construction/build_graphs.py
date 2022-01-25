@@ -13,6 +13,7 @@ import yaml
 import pickle
 import numpy as np
 import pandas as pd
+pd.options.mode.chained_assignment = None 
 import trackml.dataset
 import time
 from torch_geometric.data import Data
@@ -310,6 +311,7 @@ def get_particle_properties(hits_by_particle, valid_connections, debug=False):
     # loop over particle_ids and corresponding particle hits
     n_track_segs, reconstructable = {}, {}
     pt, eta = {}, {}
+    remap = {}
     for particle_id, particle_hits in hits_by_particle:
         
         # noise isn't reconstructable, store 0s
@@ -333,7 +335,9 @@ def get_particle_properties(hits_by_particle, valid_connections, debug=False):
         if (len(layers)==1): 
             reconstructable[particle_id] = 0
             n_track_segs[particle_id] = 0
+            remap[particle_id] = 0
             continue
+        remap[particle_id] = particle_id
         
         # all edges must be valid for a reconstructable particle
         layer_pairs = set(zip(layers[:-1], layers[1:]))
@@ -355,7 +359,7 @@ def get_particle_properties(hits_by_particle, valid_connections, debug=False):
             print(' - eta', eta[particle_id])
         
     return {'pt': pt, 'eta': eta, 'n_track_segs': n_track_segs, 
-            'reconstructable': reconstructable}
+            'reconstructable': reconstructable, 'map': remap}
 
 def get_n_track_segs(hits_by_particle, valid_connections):
     """ Calculates the number of track segments present in 
@@ -625,20 +629,22 @@ def process_event(prefix, output_dir, module_map, pt_min,
     hits, particles = select_hits(hits, truth, particles, pt_min, endcaps, 
                                   remove_noise, remove_duplicates)
     hits = hits.assign(evtid=evtid)
-    
+
     # get truth information for each particle
     hits_by_particle = hits.groupby('particle_id')
     particle_properties = get_particle_properties(hits_by_particle,
                                                   set(layer_pairs), debug=False)
     hits = hits[['hit_id', 'r', 'phi', 'eta', 'z', 'evtid',
                  'layer', 'module_id', 'particle_id']]
-    
+
+    initial_noise = np.sum(hits.particle_id==0)
+    hits['particle_id'] = hits.particle_id.map(particle_properties['map'])
+    addtl_noise = np.sum(hits.particle_id==0) - initial_noise
+    logging.info(f"Assigned {addtl_noise} single-layer particle hits as noise.")
+
     # divide detector into sectors
     phi_edges = np.linspace(*phi_range, num=n_phi_sectors+1)
     eta_edges = np.linspace(*eta_range, num=n_eta_sectors+1)
-    #eta_overlaps = np.array([abs(eta_edges[i]-eta_edges[i+1])/10. 
-    #                         for i in range(len(eta_edges)-1)])
-    logging.info(f'Using uniform eta overlaps {eta_overlaps}')
     hits_sectors, sector_info = split_detector_sectors(hits, phi_edges, eta_edges,
                                                        phi_overlap=phi_overlap,
                                                        eta_overlaps=eta_overlaps)
@@ -715,6 +721,8 @@ def main():
 
     # find the input files
     input_dir = config['input_dir']
+    train_idx = int(input_dir.split('train_')[-1][0])
+    logging.info(f"Running on train_{train_idx}")
     all_files = os.listdir(input_dir)
     suffix = '-hits.csv'
     file_prefixes = sorted(os.path.join(input_dir, f.replace(suffix, ''))
@@ -722,7 +730,7 @@ def main():
 
     # restrict files to a given input range
     evtids = [int(prefix[-9:]) for prefix in file_prefixes]
-    evtid_max, evtid_min = config['evtid_max'], config['evtid_min']
+    evtid_max, evtid_min = args.end_evtid, args.start_evtid
     if (evtid_min < np.min(evtids)): evtid_min = np.min(evtids)
     if (evtid_max > np.max(evtids)): evtid_max = np.max(evtids)
     file_prefixes = [prefix for prefix in file_prefixes
@@ -792,17 +800,17 @@ def main():
                                       'purity': purity, 'efficiency': efficiency})
     now = datetime.now()
     dt_string = now.strftime("%m-%d-%Y_%H-%M")
-    logging.debug("date and time =", dt_string)
-    outfile = 'stats/'+dt_string+'.csv'
+    outfile = 'stats/'+dt_string+f'_train{train_idx}_ptmin{pt_str}.csv'
     logging.info(f'Saving summary stats to {outfile}')
 
     f = open(outfile, 'w')
     f.write('# args used to build graphs\n')
     for arg in vars(args):
         f.write(f'# {arg}: {getattr(args,arg)}\n')
-    graph_level_stats.to_csv(f, index=False)
-    #graph_level_stats.to_csv(outfile, index=False)
+    for sel, val in config['selection'].items():
+        f.write(f'#{sel}: {val}\n')
 
+    graph_level_stats.to_csv(f, index=False)
     
     # analyze per-sector statistics
     sector_stats_list = [graph_stats['sector_stats'] 

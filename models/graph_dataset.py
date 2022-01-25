@@ -28,6 +28,10 @@ class GraphDataset(Dataset):
             edge_index = torch.from_numpy(f['edge_index'])
             y = torch.from_numpy(f['y'])
             particle_id = torch.from_numpy(f['particle_id'])
+            if len(edge_index[0])==0:
+                edge_index = torch.tensor([[],[]], dtype=torch.long)
+                edge_attr = torch.tensor([], dtype=torch.float)
+                y = torch.tensor([], dtype=torch.float)
 
             # make graph undirected
             row_0, col_0 = edge_index
