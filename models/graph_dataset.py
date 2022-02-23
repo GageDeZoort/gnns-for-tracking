@@ -28,7 +28,9 @@ class GraphDataset(Dataset):
             edge_index = torch.from_numpy(f['edge_index'])
             y = torch.from_numpy(f['y'])
             particle_id = torch.from_numpy(f['particle_id'])
-            if len(edge_index[0])==0:
+            if len(x)==0:
+                x = torch.tensor([], dtype=torch.float)
+                particle_id = torch.tensor([], dtype=torch.long)
                 edge_index = torch.tensor([[],[]], dtype=torch.long)
                 edge_attr = torch.tensor([], dtype=torch.float)
                 y = torch.tensor([], dtype=torch.float)

@@ -187,8 +187,8 @@ def construct_graph(hits, layer_pairs, phi_slope_max, z0_max,
         dr, dphi = np.array([]), np.array([])
         dz, dR = np.array([]), np.array([])
         x = (hits[feature_names].values / feature_scale).astype(np.float32)
-        return {'x': x, 'hit_id': hits['hit_id'],
-                'particle_id': hits['particle_id'],
+        return {'x': np.array([]), 'hit_id': np.array([]),
+                'particle_id': np.array([]),
                 'edge_index': np.array([[],[]]),
                 'edge_attr': np.array([[],[],[],[]]),
                 'y': np.array([]), 's': s, 
@@ -224,9 +224,13 @@ def construct_graph(hits, layer_pairs, phi_slope_max, z0_max,
     id1 = hits.hit_id.loc[edges.index_1].values
     id2 = hits.hit_id.loc[edges.index_2].values
     edge_hit_id = np.stack((id1, id2), axis=-1)
+    
+    particle_id = hits['particle_id']
+    if np.sum(np.isnan(x)): logging.info('WARNING: x contains nan!')
+    if np.sum(np.isnan(particle_id)): logging.info('WARNING: particle_id contains nan!')
 
     return {'x': x, 'hit_id': hits['hit_id'],
-            'particle_id': hits['particle_id'],
+            'particle_id': particle_id,
             'edge_index': edge_index, 'edge_attr': edge_attr, 
             'y': y, 's': s, 'n_incorrect': n_incorrect,
             'edge_hit_id': np.transpose(edge_hit_id)}
@@ -320,6 +324,7 @@ def get_particle_properties(hits_by_particle, valid_connections, debug=False):
             pt[particle_id] = 0
             eta[particle_id] = 0
             n_track_segs[particle_id] = 0
+            remap[0] = 0
             continue
             
         # store pt and eta 

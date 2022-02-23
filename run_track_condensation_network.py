@@ -245,7 +245,7 @@ def main(args):
     empty_graphs = []
     for path in graph_paths:
         f = np.load(path)
-        if (len(f['edge_index'][0])==0):
+        if (len(f['edge_index'][1])==0):
             empty_graphs.append(path)
     for g in empty_graphs: 
         graph_paths = graph_paths[graph_paths!=g]
