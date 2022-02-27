@@ -21,7 +21,7 @@ from torch_geometric.loader import DataLoader
 from torch.optim.lr_scheduler import StepLR
 
 # custom modules
-from models.graph_dataset import GraphDataset
+from utils.data_utils import *
 from models.track_condensation_network import TCN
 from models.condensation_loss import condensation_loss
 from models.condensation_loss import background_loss
@@ -47,7 +47,7 @@ def parse_args(args):
     add_arg('--q-min', type=float, default=0.001)
     add_arg('--sb', type=float, default=0.001)
     add_arg('--loss-c-scale', type=float, default=10000.0)
-    add_arg('--loss-b-scale', type=float, default=0.0025)
+    add_arg('--loss-b-scale', type=float, default=0.1)
     add_arg('--save-models', type=bool, default=False)
     return parser.parse_args(args)
 
@@ -242,13 +242,13 @@ def main(args):
                             for graph_file in graph_files])
     
     # remove empty graphs from the dataset
-    empty_graphs = []
-    for path in graph_paths:
-        f = np.load(path)
-        if (len(f['edge_index'][1])==0):
-            empty_graphs.append(path)
-    for g in empty_graphs: 
-        graph_paths = graph_paths[graph_paths!=g]
+    #empty_graphs = []
+    #for path in graph_paths:
+    #    f = np.load(path)
+    #    if (len(f['edge_index'][1])==0):
+    #        empty_graphs.append(path)
+    #for g in empty_graphs: 
+    #    graph_paths = graph_paths[graph_paths!=g]
 
     # create partion graphs randomly into train, test, val sets
     n_graphs = len(graph_paths)
@@ -279,7 +279,7 @@ def main(args):
     logging.info(f'Utilizing {device}')
     
     # instantiate instance of the track condensation network
-    model = TCN(3, 4, 2).to(device)
+    model = TCN(5, 4, 2).to(device)
     total_trainable_params = sum(p.numel() for p in model.parameters())
     logging.info(f'Total Trainable Params: {total_trainable_params}')
     

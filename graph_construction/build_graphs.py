@@ -21,7 +21,7 @@ from torch_geometric.data import Data
 from utils.graph_building_utils import *
 from utils.hit_processing_utils import *
 
-def parse_args():
+def parse_args(args):
     """Parse command line arguments."""
     parser = argparse.ArgumentParser('prepare.py')
     add_arg = parser.add_argument
@@ -34,8 +34,8 @@ def parse_args():
     add_arg('--interactive', action='store_true')
     add_arg('--start-evtid', type=int, default=0)
     add_arg('--end-evtid', type=int, default=100000)
-    add_arg('--redo', type=bool, default=False)
-    return parser.parse_args()
+    add_arg('--redo', type=bool, default=True)
+    return parser.parse_args(args)
 
 def construct_graph(hits, layer_pairs, 
                     phi_slope_max, z0_max, dR_max, uv_approach_max, 
@@ -161,6 +161,11 @@ def process_event(prefix, output_dir, module_map, pt_min,
     addtl_noise = np.sum(hits.particle_id==0) - initial_noise
     logging.info(f"Assigned {addtl_noise} single-layer particle hits as noise.")
 
+    # map other truth quantities to particles
+    track_props = particle_properties[['particle_id', 'pt', 'd0', 'q', 
+                                        'reconstructable']].values
+    track_props = {p[0]: [p[1], p[2], p[3], p[4]] for p in track_props}
+
     # divide detector into sectors
     phi_edges = np.linspace(*phi_range, num=n_phi_sectors+1)
     eta_edges = np.linspace(*eta_range, num=n_eta_sectors+1)
@@ -179,7 +184,7 @@ def process_event(prefix, output_dir, module_map, pt_min,
     # graph features and scale
     feature_names = ['r', 'phi', 'z', 'u', 'v']
     feature_scale = np.array([1000., np.pi / n_phi_sectors, 1000., 
-                              1./1000, 1./1000])
+                              1/1000., 1/1000.])
 
     # Construct the graph
     logging.info('Event %i, constructing graphs' % evtid)
@@ -217,16 +222,22 @@ def process_event(prefix, output_dir, module_map, pt_min,
     logging.info('Event %i, writing graphs', evtid)
     if save_graphs:
         for sector, filename in zip(sectors, filenames):
+            track_param_scale = np.array([1., 1/10**2, 1.])
+            track_params = np.array([track_props[p][0:3]/track_param_scale
+                                     for p in sector['particle_id']])
+            reconstructable = np.array([track_props[p][3] for p in sector['particle_id']])
             np.savez(filename, **dict(x=sector['x'], y=sector['y'], 
+                                      track_params=track_params,
+                                      reconstructable=reconstructable,
                                       particle_id=sector['particle_id'],
                                       edge_attr=sector['edge_attr'],
                                       edge_index=sector['edge_index']))
         
     return output
 
-def main():
+def main(args):
     """Main function"""
-    args = parse_args()
+    args = parse_args(args)
     initialize_logger(verbose=args.verbose)
     config = open_yaml(args.config)
     selection = config['selection']
@@ -236,6 +247,7 @@ def main():
     pt_str = map_pt(pt_min)
     
     input_dir = config['input_dir']
+    base_dir = config['base_dir']
     train_idx = int(input_dir.split('train_')[-1][0])
     logging.info(f"Running on train_{train_idx} data")
     
@@ -257,6 +269,7 @@ def main():
 
     with mp.Pool(processes=args.n_workers) as pool:
         process_func = partial(process_event, output_dir=output_dir,
+                               base_dir=base_dir,
                                phi_range=(-np.pi, np.pi), 
                                module_map=module_map,
                                **config['selection'])
@@ -339,4 +352,4 @@ def main():
                      f'...efficiency: {efficiency_s.mean():.5f}+/-{efficiency_s.std():.5f}')
         
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

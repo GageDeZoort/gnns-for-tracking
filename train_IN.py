@@ -19,6 +19,49 @@ from utils.train_utils import *
 
 initialize_logger(verbose=False)
 
+def parse_args(args):
+    parser = argparse.ArgumentParser(description='PyG Interaction Network Implementation')
+    parser.add_argument('-i', '--indir', type=str, default='graphs/train1_ptmin1',
+                        help='input graph directory')
+    parser.add_argument('--n-train', type=int, default=8000)
+    parser.add_argument('--n-test', type=int, default=2000)
+    parser.add_argument('--n-val', type=int, default=250)
+    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+                        help='input batch size for training (default: 64)')
+    parser.add_argument('--model-outdir', type=str, default='train_output/models/EC1/',
+                        help='directory in which to save models')
+    parser.add_argument('--stats-outdir', type=str, default='train_output/stats/EC1/',
+                        help='directory in which to save stats')
+    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+                        help='input batch size for testing (default: 1000)')
+    parser.add_argument('--epochs', type=int, default=75, metavar='N',
+                        help='number of epochs to train (default: 14)')
+    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
+                        help='learning rate (default: 5*10**-4)')
+    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
+                        help='Learning rate step gamma (default: 0.7)')
+    parser.add_argument('--step-size', type=int, default=5,
+                        help='Learning rate step size')
+    parser.add_argument('--pt-min', type=str, default='1',
+                        help='Cutoff pt value in GeV (default: 1 GeV)')
+    parser.add_argument('--no-cuda', action='store_true', default=False,
+                        help='disables CUDA training')
+    parser.add_argument('--dry-run', action='store_true', default=False,
+                        help='quickly check a single pass')
+    parser.add_argument('--seed', type=int, default=1, metavar='S',
+                        help='random seed (default: 1)')
+    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+                        help='how many batches to wait before logging training status')
+    parser.add_argument('--save-model', action='store_true', default=False,
+                        help='For Saving the current Model')
+    parser.add_argument('--sample', type=int, default=1,
+                        help='TrackML train_{} sample to train on')
+    parser.add_argument('--hidden-size', type=int, default=40,
+                        help='Number of hidden units per layer')
+
+    args = parse_args(args)
+
+
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     losses, t0, N = [], time(), len(train_loader)
@@ -81,49 +124,8 @@ def test(model, device, test_loader, thld=0.5):
     logging.info(f'Test accuracy: {np.nanmean(accs):.4f}')
     return np.nanmean(losses), np.nanmean(accs)
 
-def main():
-
-    # Training settings
-    parser = argparse.ArgumentParser(description='PyG Interaction Network Implementation')
-    parser.add_argument('-i', '--indir', type=str, default='graphs/train1_ptmin1',
-                        help='input graph directory')
-    parser.add_argument('--n-train', type=int, default=8000)
-    parser.add_argument('--n-test', type=int, default=2000)
-    parser.add_argument('--n-val', type=int, default=250)
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
-    parser.add_argument('--model-outdir', type=str, default='train_output/models/EC1/',
-                        help='directory in which to save models')
-    parser.add_argument('--stats-outdir', type=str, default='train_output/stats/EC1/',
-                        help='directory in which to save stats')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=75, metavar='N',
-                        help='number of epochs to train (default: 14)')
-    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
-                        help='learning rate (default: 5*10**-4)')
-    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
-                        help='Learning rate step gamma (default: 0.7)')
-    parser.add_argument('--step-size', type=int, default=5,
-                        help='Learning rate step size')
-    parser.add_argument('--pt-min', type=str, default='1',
-                        help='Cutoff pt value in GeV (default: 1 GeV)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--dry-run', action='store_true', default=False,
-                        help='quickly check a single pass')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
-                        help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-                        help='how many batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=False,
-                        help='For Saving the current Model')
-    parser.add_argument('--sample', type=int, default=1, 
-                        help='TrackML train_{} sample to train on')
-    parser.add_argument('--hidden-size', type=int, default=40,
-                        help='Number of hidden units per layer')
-
-    args = parser.parse_args()
+def main(args):
+    args = parse_args(args)
     job_name = f'IN_pt{args.pt_min}'
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -163,7 +165,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])
 
 
 
