@@ -104,7 +104,9 @@ class GraphDataset(Dataset):
             edge_index = torch.from_numpy(f['edge_index'])
             y = torch.from_numpy(f['y'])
             particle_id = torch.from_numpy(f['particle_id'])
-            
+            track_params = torch.from_numpy(f['track_params'])
+            reconstructable = torch.from_numpy(f['reconstructable'])
+
             # some segmented graphs are empty
             if len(x)==0:
                 x = torch.tensor([], dtype=torch.float)
@@ -112,6 +114,8 @@ class GraphDataset(Dataset):
                 edge_index = torch.tensor([[],[]], dtype=torch.long)
                 edge_attr = torch.tensor([], dtype=torch.float)
                 y = torch.tensor([], dtype=torch.float)
+                track_params = torch.tensor([[]], dtype=torch.float)
+                reconstructable = torch.tensor([], dtype=torch.float)
 
             # make graph undirected
             if self.bidirected==True:
@@ -126,7 +130,9 @@ class GraphDataset(Dataset):
             # return torch geometric data object
             data = Data(x=x, edge_index=edge_index,
                         edge_attr=torch.transpose(edge_attr, 0, 1),
-                        y=y, particle_id=particle_id)
+                        y=y, particle_id=particle_id,
+                        track_params=track_params.float(), 
+                        reconstructable=reconstructable.long())
             data.num_nodes = len(x)
 
         return (data, self.graph_files[idx])

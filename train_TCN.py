@@ -23,8 +23,7 @@ from torch.optim.lr_scheduler import StepLR
 # custom modules
 from utils.data_utils import *
 from models.track_condensation_network import TCN
-from models.condensation_loss import condensation_loss
-from models.condensation_loss import background_loss
+from models.condensation_loss import *
 
 def parse_args(args):
     """ parse command line arguments
@@ -35,6 +34,7 @@ def parse_args(args):
     add_arg('-o', '--outdir', type=str, default='trained_models')
     add_arg('--stat-outfile', type=str, default='test')
     add_arg('--model-outfile', type=str, default='model')
+    add_arg('--predict-track-params', type=bool, default=True)
     add_arg('-v', '--verbose', type=bool, default=0)
     add_arg('--n-train', type=int, default=120)
     add_arg('--n-test', type=int, default=30)
@@ -48,6 +48,7 @@ def parse_args(args):
     add_arg('--sb', type=float, default=0.001)
     add_arg('--loss-c-scale', type=float, default=10000.0)
     add_arg('--loss-b-scale', type=float, default=0.1)
+    add_arg('--loss-o-scale', type=float, default=1.0)
     add_arg('--save-models', type=bool, default=False)
     return parser.parse_args(args)
 
@@ -167,12 +168,19 @@ def train(args, model, device, train_loader, optimizer, epoch):
     losses_w = [] # edge weight loss
     losses_c = [] # condensation loss
     losses_b = [] # background loss
+    losses_o = [] # object loss
     for batch_idx, (data, f) in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
-        w, xc, beta = model(data.x, data.edge_index, data.edge_attr)
+
+        if args.predict_track_params:
+            w, xc, beta, p = model(data.x, data.edge_index, data.edge_attr)
+        else: 
+            w, xc, beta = model(data.x, data.edge_index, data.edge_attr)
+
         y, w = data.y, w.squeeze(1)
         particle_id = data.particle_id
+        track_params = data.track_params
 
         # edge weight loss
         loss_w = F.binary_cross_entropy(w, y, reduction='mean')
@@ -185,9 +193,18 @@ def train(args, model, device, train_loader, optimizer, epoch):
         
         # background loss
         loss_b = background_loss(beta, xc, particle_id, 
-                                 device='cpu', q_min=args.q_min, 
+                                 device=device, q_min=args.q_min, 
                                  sb=args.sb)
         loss_b *= args.loss_b_scale
+
+        # object loss
+        if args.predict_track_params:
+            loss_o = object_loss(p, beta, 
+                                 track_params, particle_id,
+                                 device=device)
+            loss_o *= args.loss_o_scale
+            loss += loss_o
+            losses_o.append(loss_o.item())
  
         # optimize total loss
         loss += (loss_c + loss_b)
@@ -199,6 +216,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
                         .format(epoch, batch_idx, len(train_loader.dataset),
                                 100. * batch_idx / len(train_loader), 
                                 loss.item()))
+            logging.info(f'...losses: w={loss_w.item()}, c={loss_c.item()}' + 
+                         f'           b={loss_b.item()}, o={loss_o.item()}')
         
         # store losses
         losses.append(loss.item())
@@ -279,7 +298,7 @@ def main(args):
     logging.info(f'Utilizing {device}')
     
     # instantiate instance of the track condensation network
-    model = TCN(5, 4, 2).to(device)
+    model = TCN(5, 4, 2, predict_track_params=True).to(device)
     total_trainable_params = sum(p.numel() for p in model.parameters())
     logging.info(f'Total Trainable Params: {total_trainable_params}')
     

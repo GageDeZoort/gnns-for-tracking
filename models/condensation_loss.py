@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import mse_loss
 
 def V_attractive(x, x_alpha, q_alpha, device='cpu'):
     norm_sq = torch.norm(x-x_alpha, dim=1)**2
@@ -25,7 +26,7 @@ def condensation_loss(beta, x, particle_id, device='cpu', q_min=1):
         x_alpha = x_pid[alpha]
         va = V_attractive(x, x_alpha, q_alpha, device=device)
         vr = V_repulsive(x, x_alpha, q_alpha, device=device)
-        loss += torch.mean(q*(M*va + 10*(1-M)*vr))  
+        loss += torch.mean(q*(M*va + (1-M)*vr))  
     return loss
 
 def background_loss(beta, x, particle_id, device='cpu', q_min=1, sb=10):
@@ -45,3 +46,24 @@ def background_loss(beta, x, particle_id, device='cpu', q_min=1, sb=10):
     nb = torch.sum(n)
     if (nb==0): return torch.tensor(0, dtype=float)
     return torch.mean(1-beta_alphas) + sb * torch.sum(n*beta) / nb
+
+def L(p, t):
+    return torch.sum(mse_loss(p, t, reduction='none'), dim=1)
+
+def object_loss(pred, beta, truth, particle_id, high='efficiency', device='cpu'):
+    n = (particle_id==0).long()
+    xi = (1-n) * (torch.arctanh(beta))**2
+    mse = L(pred, truth)
+    if (high=='purity'):
+        return 1/torch.sum(xi) * torch.mean(xi * mse)
+    loss = torch.tensor(0.0, dtype=torch.float).to(device)
+    K = torch.tensor(0.0, dtype=torch.float).to(device)
+    for pid in torch.unique(particle_id):
+        p = pid.item()
+        if (p==0): continue
+        M = (particle_id==p).squeeze(-1)
+        xi_p = M*p
+        weight = 1./(torch.sum(xi_p))
+        loss += weight * torch.sum(mse * xi_p)
+        K += 1.0
+    return loss/K

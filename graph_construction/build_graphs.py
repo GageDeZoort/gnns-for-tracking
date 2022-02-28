@@ -153,13 +153,13 @@ def process_event(prefix, output_dir, module_map, pt_min,
     hits = hits[['hit_id', 'r', 'phi', 'eta', 'u', 'v', 'z', 
                  'evtid', 'layer', 'module_id', 'particle_id']]
 
-    # map single hit particles to noise
+    # map non-reconstructable particles to noise
     initial_noise = np.sum(hits.particle_id==0)
-    pid_n_layers_hit = particle_properties[['particle_id', 'n_layers_hit']].values
-    pid_n_layers_hit = {p: int(n>1)*p for p, n in pid_n_layers_hit}
+    pid_n_layers_hit = particle_properties[['particle_id', 'reconstructable']].values
+    pid_n_layers_hit = {p: r*p for p, r in pid_n_layers_hit}
     hits['particle_id'] = hits.particle_id.map(pid_n_layers_hit)
     addtl_noise = np.sum(hits.particle_id==0) - initial_noise
-    logging.info(f"Assigned {addtl_noise} single-layer particle hits as noise.")
+    logging.info(f"Assigned {addtl_noise} non-reconstructable particles as noise.")
 
     # map other truth quantities to particles
     track_props = particle_properties[['particle_id', 'pt', 'd0', 'q', 
@@ -222,8 +222,8 @@ def process_event(prefix, output_dir, module_map, pt_min,
     logging.info('Event %i, writing graphs', evtid)
     if save_graphs:
         for sector, filename in zip(sectors, filenames):
-            track_param_scale = np.array([1., 1/10**2, 1.])
-            track_params = np.array([track_props[p][0:3]/track_param_scale
+            track_param_scale = np.array([1., 10**3, 1.])
+            track_params = np.array([track_props[p][:3]/track_param_scale
                                      for p in sector['particle_id']])
             reconstructable = np.array([track_props[p][3] for p in sector['particle_id']])
             np.savez(filename, **dict(x=sector['x'], y=sector['y'], 
