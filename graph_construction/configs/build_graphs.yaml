@@ -2,7 +2,7 @@
 base_dir: /scratch/gpfs/jdezoort/gnns-for-tracking/graph_construction
 input_dir: /tigress/jdezoort/codalab/train_1
 output_dir: /scratch/gpfs/jdezoort/gnns-for-tracking/graphs/train1_ptmin0p8
-module_map_dir: 
+module_map_dir:
 n_files: 1000
 
 # Graph building configuration
@@ -16,7 +16,7 @@ selection:
     n_eta_sectors: 6
     phi_overlap: 0.1
     eta_overlaps: 0.13
-    eta_range: [-4, 4] 
+    eta_range: [-4, 4]
     endcaps: true
     remove_noise: true
     remove_duplicates: false
@@ -28,8 +28,8 @@ selection:
 # --------------------------------------------------------------------
 #  pt [GeV]  phi_slope [1/mm]  z0 [mm]  dR [a.u.]  uv_approach [1/mm]
 # --------------------------------------------------------------------
-#  0.0       0.005             200      1.7        0.0015     
+#  0.0       0.005             200      1.7        0.0015
 #
 #  (gives 0.987 efficiency and 0.264 purity for >0.8GeV tracks)
 #  (gives 0.988 efficiency and 0.335 purity for >1.0GeV tracks)
-# 
+#
